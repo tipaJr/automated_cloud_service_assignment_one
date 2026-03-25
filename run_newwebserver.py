@@ -9,6 +9,7 @@ ec2 = boto3.resource('ec2')
 s3 = boto3.client('s3')
 s3_resource = boto3.resource('s3')
 
+# https://docs.aws.amazon.com/boto3/latest/guide/s3-example-creating-buckets.html
 def create_bucket(bucket_name, region='us-east-1'):
     try:
         bucket_config = {}
@@ -37,21 +38,23 @@ def html_script(instance_id, availability_zone):
 
 def cleanup_function(ec2_instance_object, s3_object):
 
+    # aws boto 3 docs
     print("Initiating clean up")
 
     ec2_instance_object.terminate()
     ec2_instance_object.wait_until_terminated()
+    print("✅ ec2 instance successfully terminated.")
 
     s3_object.objects.all().delete()
     s3_object.delete()
+    print("✅ s3 bucket successfully deleted.")
 
-    print("cleanup function ran successfully, ec2 instances and buckets were deleted :)")
+    print("\n==================================================================================================")
+    print("✨ cleanup function ran successfully, ec2 instances and buckets were deleted ✨")
+    print("====================================================================================================")
 
-
-instance_list = []
-
-for inst in ec2.instances.all():
-    instance_list.append(inst)
+print("\n creating EC2 Instance")
+print(" -> locating AMI and configuring instance details")
 
 instances = ec2.create_instances(
     ImageId='ami-02dfbd4ff395f2a1b',
@@ -65,23 +68,35 @@ instances = ec2.create_instances(
 )
 
 mainInstance = instances[0]
+print(f" -> instance created (ID: {mainInstance.id}). waiting for it to enter the 'running' state")
+
+# https://docs.aws.amazon.com/boto3/latest/reference/services/ec2/instance/wait_until_running.html
 mainInstance.wait_until_running()
 mainInstance.reload()
+print("✅ ec2 Instance is now running")
+
 bucket_name = f"eugene-tipa-{mainInstance.id}"
+print("\nsetting up S3 Bucket and Assets")
+print(f" creating bucket: {bucket_name}")
 create_bucket(bucket_name=bucket_name)
 
-
+print(" -> Creating index.html locally")
+# https://discuss.python.org/t/general-question-using-python-html-file-in-local-folder/88230
 with open("index.html", "w") as f:
     f.write(html_script(instance_id=mainInstance.id, availability_zone=mainInstance.placement["AvailabilityZone"]))
 
+print(" -> uploading index.html and image to S3")
 s3.upload_file("index.html", bucket_name, "index.html")
-
 s3.upload_file("image_cloud_services_assignment.jpeg", bucket_name, "image_cloud_services_assignment.jpeg")
+print("✅ s3 setup complete")
 
 key_file_path = "automated_cloud_services_assignment_one.pem"
 
+print("\n waiting for eC2 SSH service to initialize...")
 time.sleep(60)
+print("\n ✅ SSH service is ready")
 
+print("\n configuring remote web server")
 check_script = """#!/usr/bin/python3
 import subprocess
 
@@ -96,7 +111,7 @@ def check_server():
 if __name__ == '__main__':
     check_server()
 """
-
+print(" -> Creating check_webserver.py locally")
 with open("check_webserver.py", "w") as f:
     f.write(check_script)
 
@@ -104,8 +119,9 @@ scp_command = f"scp -i {key_file_path} -o StrictHostKeyChecking=no check_webserv
 print(f"triggering command: \n{scp_command}")
 try:
     subprocess.run(scp_command, shell=True, timeout=90, check=True)
+    print("✅ script uploaded successfully.")
 except subprocess.TimeoutExpired:
-    print("error with the command above")
+    print("❌ error with the command above")
 
 linux_commands = f"""
 sudo yum install -y httpd
@@ -121,16 +137,17 @@ ssh_command = f"ssh -t -i {key_file_path} -o StrictHostKeyChecking=no ec2-user@{
 print(f"triggering ssh command: \n{ssh_command}")
 try:
     subprocess.run(ssh_command, shell=True, timeout=90, check=True)
+    print("✅ apache installed successfully and downloaded s3 files")
 except subprocess.TimeoutExpired:
-    print("error with the command above")
+    print("❌ error with the command above")
 
 website_url = f"http://{mainInstance.public_ip_address}"
+print("\nOpening web browser to verify deployment")
 webbrowser.open(website_url)
 
+print("✅ DEPLOYMENT SUCCESSFUL ✅\n\n")
 
-print(f"Instance public_ip: {mainInstance.public_ip_address}")
-
-print("\n====================================================================================================================================================================================")
+print("\n====================================================================================================================================================================================\n")
 print(f"the web server is currently running. You can view it in your browser or at this url: {website_url}.")
 print("when you are finished, type 'cleanup' and press Enter to delete the ec2 and s3 resources.")
 print("\n====================================================================================================================================================================================")
